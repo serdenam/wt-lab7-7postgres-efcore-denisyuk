@@ -2,13 +2,59 @@ using Microsoft.EntityFrameworkCore;
 using wt_lab7_7postgres_efcore_denisyuk.Data;
 using wt_lab7_7postgres_efcore_denisyuk.Models;
 using NSwag.AspNetCore;
+using Npgsql; // Обязательно добавлено для NpgsqlConnectionStringBuilder
 
 var builder = WebApplication.CreateBuilder(args);
 
 // ==========================================
 // 1. Подключение к базе данных (PostgreSQL)
 // ==========================================
+var databaseUrl = Environment.GetEnvironmentVariable("DATABASE_URL");
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+
+// Диагностика: выводим в логи, что видит приложение
+Console.WriteLine("========================================");
+Console.WriteLine($"DEBUG: DATABASE_URL is null or empty? {string.IsNullOrWhiteSpace(databaseUrl)}");
+if (!string.IsNullOrWhiteSpace(databaseUrl))
+{
+    Console.WriteLine($"DEBUG: DATABASE_URL starts with: {databaseUrl.Substring(0, Math.Min(20, databaseUrl.Length))}...");
+}
+Console.WriteLine($"DEBUG: DefaultConnection is null or empty? {string.IsNullOrWhiteSpace(connectionString)}");
+Console.WriteLine("========================================");
+
+if (!string.IsNullOrWhiteSpace(databaseUrl))
+{
+    try
+    {
+        // Надежный парсинг URL от Render
+        var uri = new Uri(databaseUrl);
+        var userInfo = uri.UserInfo.Split(':', 2);
+
+        var dbBuilder = new NpgsqlConnectionStringBuilder
+        {
+            Host = uri.Host,
+            Port = uri.Port,
+            Database = uri.AbsolutePath.TrimStart('/'),
+            Username = Uri.UnescapeDataString(userInfo[0]),
+            Password = Uri.UnescapeDataString(userInfo[1]),
+            SslMode = SslMode.Disable // Важно для внутренней сети Render
+        };
+
+        connectionString = dbBuilder.ConnectionString;
+        Console.WriteLine("DEBUG: Successfully parsed DATABASE_URL into connection string.");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"DEBUG ERROR: Failed to parse DATABASE_URL. Exception: {ex.Message}");
+    }
+}
+
+// Если строки подключения нет вообще, выбрасываем понятную ошибку
+if (string.IsNullOrWhiteSpace(connectionString))
+{
+    throw new InvalidOperationException("КРИТИЧЕСКАЯ ОШИБКА: Строка подключения пуста! Render не передал DATABASE_URL, и локальная строка тоже отсутствует.");
+}
+
 builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString));
 
 // ==========================================
